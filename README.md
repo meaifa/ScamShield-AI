@@ -1,4 +1,4 @@
-# 🛡️ ScamShield: AI-Powered Scam Detector
+eeeeeeeeee# 🛡️ ScamShield: AI-Powered Scam Detector
 
 **ScamShield** is a Machine Learning web application designed to protect Malaysians from digital threats by analyzing suspicious SMS, Emails, and URLs.
 
@@ -16,7 +16,7 @@ Digital scams involving TNG e-Wallet, LHDN, and bank phishing are a rising threa
 ## 🛠️ Tech Stack
 - **Frontend:** Streamlit
 - **Model:** Logistic Regression & TF-IDF Vectorization
-- **Language:** Python 3.x
+- **Language:** Python 3.13.11
 
 ## ⚙️ Setup & How to Run
 1. **Clone the Repo:**
@@ -27,5 +27,4 @@ Digital scams involving TNG e-Wallet, LHDN, and bank phishing are a rising threa
    `streamlit run ScamShield.py`
 
 ## 🧠 AI Logic
-The system cleans input text and uses **TF-IDF Vectorization** to highlight suspicious keywords (e.g., "Verify", "Restricted", "RM0.00"). A **Logistic Regression** model then calculates the likelihood of the content being a scam.
 The system cleans input text and uses **TF-IDF Vectorization** to highlight suspicious keywords (e.g., "Verify", "Restricted", "RM0.00"). A **Logistic Regression** model then calculates the likelihood of the content being a scam.

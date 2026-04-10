@@ -8,13 +8,18 @@ import sklearn
 import streamlit.components.v1 as components
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+
+st.set_page_config(layout="wide")
+
 def reset_analysis():
     st.session_state.analyzed = False
     st.session_state.label = ""
     st.session_state.score = 0
+    st.session_state.show_popup = False
 
 if "page" not in st.session_state:
     st.session_state.page = "Scam Analyzer"
+    reset_analysis()
 
 #### Memory Session State ###
 if 'analyzed' not in st.session_state:
@@ -25,8 +30,6 @@ if 'analyzed' not in st.session_state:
 # store input text
 if "input_text" not in st.session_state:
     st.session_state.input_text = ""
-
-st.set_page_config(layout="wide")
 
 # Background and Logo
 def set_bg(img_file):
@@ -85,15 +88,16 @@ set_bg("background.streamlit.png")
 
 
 def highlight_text(text):
-    # Expanded keywords for better detection
+  
     keywords = ["urgent", "click", "verify", "login", "http", "now", "win", "prize", "suspended", "account", "pos"]
     
     for word in keywords:
-        # This finds the word even if it's "URGENT" or "Urgent"
         pattern = re.compile(re.escape(word), re.IGNORECASE)
-        # We use a semi-transparent red background
+
         text = pattern.sub(f"<span style='background-color:rgba(255, 75, 75, 0.3); color:#FF4B4B; font-weight:bold; border-radius:4px; padding:0 4px;'>{word}</span>", text)
     return text
+
+
 # LOGO & TITLE SECTION
 
 col, col2 = st.columns([1, 10])
@@ -169,15 +173,9 @@ with nav4:
 
 st.markdown("<hr style='border: 1px solid #160C31; margin-top: 15px; margin-bottom: 15'>", unsafe_allow_html=True)
 
-
-
-
 #########################################################################################################
 
-
 if st.session_state.page == "Scam Analyzer":
-
-   col_main, col_result = st.columns([2.8, 1.8], gap="medium")
 
    with st.expander("📖 How to use the Scam Analyzer", expanded=True):
        st.markdown("""
@@ -187,6 +185,9 @@ if st.session_state.page == "Scam Analyzer":
        4. **Review** the Prediction Result on the right for risk levels and safety advice.
        """)
 
+   col_main, col_result = st.columns([2.8, 1.8], gap="medium")
+
+   
 #####################################################################################################################################################
 
    with col_main:
@@ -206,19 +207,41 @@ if st.session_state.page == "Scam Analyzer":
                st.markdown(f'<p class="metric-text" style="margin-bottom: -5px;">Paste the {input_mode} here :</p>', unsafe_allow_html=True)
                st.markdown('<div style="margin-top: -15px;"></div>', unsafe_allow_html=True)
                user_input = st.text_area("Input", height=60, label_visibility="collapsed", key="input_text", on_change=reset_analysis)
-              
                # Gap before BUTTON
-
                st.markdown("""<style>div.stButton {margin-top: 10px !important;}</style>""", unsafe_allow_html=True)
            
                if st.button("Analyze Content", use_container_width=True, key="btn_analyze"):
-                   
                    cleaned_input = user_input.strip()
-                   #if user_input.strip() == "":
+                
                    if cleaned_input == "":
-                       st.warning("Please enter text first")
+                        st.warning("Please enter text first")
 
                    else:
+                        # INITIALIZE FLAG
+                        flags = []
+                        url_lower = cleaned_input.lower()
+
+                        st.session_state.final_text = cleaned_input
+                        input_lower = cleaned_input.lower()
+                        # PREDICTION LOGIC
+                        if input_mode == "Email":
+                           prediction = model_combined.predict([cleaned_input])[0]
+                           proba = model_combined.predict_proba([cleaned_input])
+
+                        elif input_mode == "SMS":
+                           text_vec = vectorizer_sms.transform([cleaned_input])
+                           prediction = model_sms.predict(text_vec)[0]
+                           proba = model_sms.predict_proba(text_vec)
+
+                        else: # URL Mode
+                           prediction = model_combined.predict([cleaned_input])[0]
+                           proba = model_combined.predict_proba([cleaned_input])
+                    
+                        # HOMOGRPAH CHECK
+
+                        if any(ord(char) > 127 for char in user_input):
+                           flags.append("🚩 **Homograph Attack:** Non-standard characters detected in the text/link.")
+
                         scam_keywords = [
                             #financial
                             "guaranteed returns", "investment scam", "crypto investment", "high-yield", "no risk", "online trading", "forex scam",
@@ -229,67 +252,50 @@ if st.session_state.page == "Scam Analyzer":
                             "act now", "legal action", "penalty", "immediate action required", "final warning","re-delivery fee", "incomplete address"
                             #Tech
                             "device is infected", "virus detected" "scareware", "ransomware", "account compromised"]
-                        
-                        cleaned_input = user_input.strip()
-    
-                        # ADD THIS LINE: Save it so the result column can find it!
-                        st.session_state.final_text = cleaned_input
-                        
-                        # 2. THE FAIL-SAFE (Keyword Rule)
-                        input_lower = cleaned_input.lower()
-                        # Using word boundaries (\b) to prevent false positives like 'winter'
-                        manual_check = any(
-                           re.search(r'\b' + re.escape(word) + r'\b', input_lower) 
-                           for word in scam_keywords
+                    
+                        manual_check = any(re.search(r'\b' + re.escape(word) + r'\b', input_lower) for word in scam_keywords)
+
+                        if manual_check:
+                           flags.append("🚩 **Blacklisted Keywords:** Found known scam phrases.")
+
+                        # URGENT TONE CHECK
+                        if re.search(r'(urgent|action required|immediately|locked|suspended)', input_lower, re.IGNORECASE):
+                           flags.append("🚩 **Urgent Tone:** The message uses pressure tactics.")
+
+                        if re.search(r'(\$|RM|prize|reward|cash)', user_input, re.IGNORECASE):
+                           flags.append("🚩 **Financial Bait:** Promising money is a common scam tactic.")
+
+                        # 4. URL Pattern Check
+                        url_pattern_check = (
+                            re.search(r"https?://\d+\.\d+\.\d+\.\d+", url_lower) or 
+                            any(s in url_lower for s in ["bit.ly", "tinyurl", "t.co"]) or 
+                            url_lower.count(".") > 3
                         )
+                        url_keywords = ["login", "verify", "update", "secure", "account", "confirm", "bank", "signin"]
+                        manual_check_url = any(word in url_lower for word in url_keywords)
+                        if url_pattern_check or manual_check_url:
+                           flags.append("🚩 **Suspicious Link:** Hidden or non-standard, or sensitive URL detected.")
                 
 
-                        #st.markdown("""<style>div.stButton {margin-top: -25px !important;}</style>""", unsafe_allow_html=True)
-     
-                    #  THE AI BRAIN SWITCHER
+                        st.markdown("""<style>div.stButton {margin-top: -25px !important;}</style>""",)
+                        is_scam_trigger = manual_check or manual_check_url or url_pattern_check
 
-                        if input_mode == "Email":
-                           prediction = model_combined.predict([cleaned_input])[0]
-                           proba = model_combined.predict_proba([cleaned_input])
-                
-                        elif input_mode == "SMS":
-                           text_vec = vectorizer_sms.transform([cleaned_input])
-                           prediction = model_sms.predict(text_vec)[0]
-                           proba = model_sms.predict_proba(text_vec)
-                
-                        else: # URL Mode
-                           prediction = model_combined.predict([cleaned_input])[0]
-                           proba = model_combined.predict_proba([cleaned_input])
-
-                           # --- STRONG URL TECHNICAL LOGIC START ---
-                           url_lower = cleaned_input.lower()
-
-                           url_keywords = ["login", "verify", "update", "secure", "account", "confirm", "bank", "signin"]
-                           manual_check_url = any(word in url_lower for word in url_keywords)
-
-                           url_pattern_check = (
-                               re.search(r"https?://\d+\.\d+\.\d+\.\d+", url_lower) or 
-                               any(s in url_lower for s in ["bit.ly", "tinyurl", "t.co"]) or 
-                               url_lower.count(".") > 3
-                               )
-                           
-                           manual_check = manual_check or manual_check_url or url_pattern_check
-
-                        if prediction == 1 or manual_check:
+                        # SAVE RESULTS TO SESSION STATE
+                        if prediction == 1 or is_scam_trigger:
                            st.session_state.label = "SCAM"
-                           # Show the higher confidence: either the model probability or a 85% floor for manual matches
                            confidence = int(max(proba[0]) * 100)
-                           st.session_state.score = max(confidence, 85) if manual_check else confidence
+                           st.session_state.score = max(confidence, 85) if is_scam_trigger else confidence
+                           st.session_state.popup_flags = flags
 
                         else:
                            st.session_state.label = "LEGIT"
                            st.session_state.score = int(max(proba[0]) * 100)
+                           st.session_state.show_popup = False
 
                         st.session_state.analyzed = True
                         st.toast("Real-Time Analysis Complete!")
                         st.rerun()
 
-               st.markdown("<br>", unsafe_allow_html=True) 
    
                col_perf, col_samp = st.columns([1, 1])
 
@@ -301,7 +307,7 @@ if st.session_state.page == "Scam Analyzer":
                         for name, val in metrics:
                             st.markdown(f"""
                                 <div style="margin-bottom: 10px;">
-                                    <div style="display: flex; justify-content: space-between; color: white; font-size: 14px;">
+                                    <div style="display: flex; justify-content: space-between; color: white; font-size: 15px;">
                                         <span>{name}</span><span>{val}%</span>
                                     </div>
                                     <div style="width: 100%; height: 6px; background: #334155; border-radius: 5px;">
@@ -321,7 +327,7 @@ if st.session_state.page == "Scam Analyzer":
                         ]
                         for s in samples:
                             st.markdown(f"""
-                                <div style="background-color: rgba(255, 75, 75, 0.1); color: #FF4B4B; padding: 8px; border-radius: 5px; margin-bottom: 8px; border: 1px solid rgba(255, 75, 75, 0.2); font-size: 13px;">
+                                <div style="background-color: rgba(255, 75, 75, 0.1); color: #FF4B4B; padding: 8px; border-radius: 5px; margin-bottom: 8px; border: 1px solid rgba(255, 75, 75, 0.2); font-size: 16px;">
                                    {s}
                                 </div>
                             """, unsafe_allow_html=True)
@@ -338,20 +344,20 @@ if st.session_state.page == "Scam Analyzer":
                if not st.session_state.analyzed:
                    st.info("Waiting for input...")
                else:
+                   text_to_scan = st.session_state.get('final_text', '')
+                   text_lower = text_to_scan.lower()
+                   label = st.session_state.label
                    score = st.session_state.score
-                   text_to_scan = st.session_state.get('input_text', '')
 
                   # 1. CHECK THE LABEL FIRST
                    if st.session_state.label == "SCAM":
-   
                         color, bg_color, risk = "#FF4B4B", "rgba(255, 75, 75, 0.2)", "High"
                    elif st.session_state.label == "SUSPICIOUS":
-                       color, bg_color, risk = "#FACC15", "rgba(250, 204, 21, 0.2)", "Medium"
+                        color, bg_color, risk = "#FACC15", "rgba(250, 204, 21, 0.2)", "Medium"
                    else: # LEGIT
                         color, bg_color, risk = "#4ADE80", "rgba(74, 222, 128, 0.2)", "Low"
 
-                        
-                  # --- BADGE ---
+                    # --- BADGE ---
                    st.markdown(f"""
                        <div style="background-color: {bg_color}; padding: 10px; border-radius: 10px; display: flex; justify-content: space-between; align-items: center; border: 1px solid {color};">
                            <span style="color: {color}; font-weight: bold; font-size: 18px;">{st.session_state.label}</span>
@@ -359,15 +365,18 @@ if st.session_state.page == "Scam Analyzer":
                        </div>
                    """, unsafe_allow_html=True)
 
+                   if st.session_state.label == "SCAM":
+                        st.markdown("#### 🚩 Risk Analysis")
+                        for f in st.session_state.get("analysis_flags", []):
+                            st.write(f)
+
                # --- SCORE & GAUGE SECTION ---
                    cols = st.columns([1.5, 1])
-                  
-            
                    with cols[0]:
                        st.markdown(f'<p style="color: white; margin-top: 15px; margin-bottom: 0px;">Confidence: <b>{score}%</b></p>', unsafe_allow_html=True)
                        st.markdown(f'<p style="color: white; margin-bottom: 5px;">Risk Score: <b style="color:{color};">{risk}</b></p>', unsafe_allow_html=True)
                 
-                # REPAIRED Progress Bar (Uses {color} now, not the gradient)
+                # REPAIRED Progress Bar 
                        st.markdown(f"""
                            <div style="width: 100%; height: 8px; background: #334155; border-radius: 5px;">
                                <div style="width: {score}%; height: 100%; background: {color}; border-radius: 5px;"></div>
@@ -388,12 +397,10 @@ if st.session_state.page == "Scam Analyzer":
 
 
                    st.divider()
-                   if st.session_state.label == "SCAM" or st.session_state.label == "SUSPICIOUS":
-                   # --- ADVANCED XAI LOGIC ---
+                   if st.session_state.label in ["SCAM", "SUSPICIOUS"]:
+                   #  ADVANCED XAI LOGIC 
                         st.markdown('<p style="color: white; font-weight: bold; font-size: 20px;">Why this was flagged:</p>', unsafe_allow_html=True)
 
-                  # Process the user's input through our highlight function
-                        text_to_scan = st.session_state.get('final_text', '')
                         highlighted_msg = highlight_text(text_to_scan)
                         st.markdown(f"""
                              <div style="background-color: #0f172a; padding: 15px; border-radius: 10px; border: 1px solid #334155; line-height: 1.6; color: #CBD5E1;">
@@ -402,7 +409,6 @@ if st.session_state.page == "Scam Analyzer":
                         """, unsafe_allow_html=True)
                 
                         reasons = []
-                        text_lower = st.session_state.input_text.lower()
 
                         if any(word in text_lower for word in ["urgent", "immediately", "now", "30 minutes"]):
                              reasons.append("⚠️ **Urgency detected** — Scammers use 'Time Pressure' to bypass logical thinking.")
@@ -514,7 +520,7 @@ elif st.session_state.page == "Home":
 
     st.markdown("---")
 
-    # --- 3. THE SCAM FLOW (Process Architecture) ---
+    # THE SCAM FLOW (Process Architecture) 
     st.markdown("### 🔄 How the Scam Works")
     st.caption("Understand the automation behind a scammer's attack logic.")
     
@@ -539,7 +545,7 @@ elif st.session_state.page == "Home":
         """, height=150
     )
 
-    # 4-Column Logic Flow
+    # Column Logic Flow
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         st.info("**1. The Hook**\nReceive unknown SMS/Email")
@@ -552,7 +558,7 @@ elif st.session_state.page == "Home":
 
     st.markdown("---")
 
-    # --- 4. THE MONEY LAUNDERING TRAP ---
+    #  THE MONEY LAUNDERING TRAP 
     st.markdown("### 🔴 The Money Laundering Trap")
     with st.container(border=True):
         st.error("#### **Scenario: Received money by mistake?**")
@@ -568,7 +574,7 @@ elif st.session_state.page == "Home":
 
     st.markdown("---")
 
-    # --- 5. SAFETY RULES (The "Keys") ---
+    # SAFETY RULES 
     st.markdown("### ❌ NEVER SHARE THESE")
     st.caption("Protect your personal 'Keys' to stay safe online.")
     
@@ -594,9 +600,9 @@ elif st.session_state.page == "Home":
 #################################################################################################################
 elif st.session_state.page == "Trust Center":
     st.markdown("## 🛡️ Trust Center & Scam Insights")
-    st.info("This hub provides transparency on how our AI works and the real-world threats it is designed to stop.")
+    st.info("This hub explains how our scanning engine works and the specific tactics used by scammers that it is built to detect.")
 
-    # --- 1. MALAYSIAN THREAT LANDSCAPE ---
+    # - MALAYSIAN THREAT LANDSCAPE
     st.subheader("🔥 Current Trending Scams in Malaysia")
     
     t1, t2, t3 = st.columns(3)
@@ -615,14 +621,13 @@ elif st.session_state.page == "Trust Center":
 
     st.divider()
 
-    # --- 2. THE WATCHLIST (Transparency) ---
+    #  THE WATCHLIST 
     col_a, col_b = st.columns([1, 1])
     
     with col_a:
         st.subheader("🚩 'Red Flag' Watchlist")
         st.write("Our engine specifically monitors these keywords and patterns:")
         
-        # Creating a nice list of what the logic looks for
         st.markdown("""
         * **Urgency:** *Immediately, Suspended, Blocked, Action Required.*
         * **Financial Triggers:** *RM, Refund, Unpaid, Tax, Bonus.*
@@ -641,22 +646,7 @@ elif st.session_state.page == "Trust Center":
 
     st.divider()
 
-    # --- 3. LECTURER'S VAULT (The High-Level Specs) ---
-    with st.expander("🛠️ Lecturer's Vault: Technical Model Specifications"):
-        st.markdown("#### **System Architecture & Performance**")
-        
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Model Precision", "94.2%", "Logistic Regression")
-        m2.metric("Detection Speed", "180ms", "Low Latency")
-        m3.metric("Data Source", "5k+ Samples", "Cleaned & Vectorized")
-        
-        st.markdown("""
-        **Developer Note:** As an Electronic Engineering (Communication) graduate, I have prioritized **Precision** over everything else. 
-        In communication systems, 'Noise' (False Positives) can ruin user trust. This model uses a hybrid **TF-IDF Vectorization** method combined with a deterministic keyword safety net to ensure that high-risk threats are flagged even if the 
-        sentence structure is unusual or very short.
-        """)
-
-    # --- 4. CALL TO ACTION ---
+    # CALL TO ACTION 
     st.warning("🆘 **Scammed?** Don't wait. Call the **National Scam Response Centre (NSRC)** at **997** immediately.")
     
     if st.button("🔗 Visit Official NSRC Website"):
@@ -667,13 +657,12 @@ elif st.session_state.page == "About":
     st.markdown("## ℹ️ Help & Support")
     st.markdown("---")
 
-    # 1. THE EMERGENCY CONTACT (Highest Priority)
-    with st.container(border=True):
-        st.markdown("<h3 style='text-align: center; color: #ff4b4b;'>🚨 SCAM EMERGENCY?</h3>", unsafe_allow_html=True)
-        st.markdown("<h1 style='text-align: center; margin-bottom: 0;'>Call NSRC at 997</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: gray;'>8:00 AM - 8:00 PM Daily</p>", unsafe_allow_html=True)
-        st.write("")
-        st.info("If you have accidentally shared your banking details or transferred money to a scammer, call the **National Scam Response Centre** immediately to increase the chances of freezing the funds.")
+    # THE EMERGENCY CONTACT 
+    st.markdown("<h3 style='text-align: center; color: #ff4b4b;'>🚨 SCAM EMERGENCY?</h3>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; margin-bottom: 0;'>Call NSRC at 997</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: gray;'>8:00 AM - 8:00 PM Daily</p>", unsafe_allow_html=True)
+    st.write("")
+    st.info("If you have accidentally shared your banking details or transferred money to a scammer, call the **National Scam Response Centre** immediately to increase the chances of freezing the funds.")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -706,5 +695,8 @@ elif st.session_state.page == "About":
         st.link_button("CyberSecurity Malaysia", "https://www.cybersecurity.my/", use_container_width=True)
         st.caption("Reporting cyber incidents and technical threats.")
 
+
+
     st.divider()
     st.caption("ScamShield AI © 2026 - Designed to protect the Malaysian digital community.")
+

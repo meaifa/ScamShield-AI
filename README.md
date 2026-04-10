@@ -1,7 +1,6 @@
 # 🛡️ ScamShield: AI-Powered Scam Detector
 
-**ScamShield** is is a simple but powerful tool I designed help people in Malaysia spot digital scams before it’s too late. Whether it's a suspicious SMS about your TNG e-Wallet or a weird email claiming to be from LHDN, this app uses AI to identify potential danger.
-
+**ScamShield** is  a simple but powerful tool designed help people in Malaysia spot digital scams before it’s too late. Whether it's a suspicious SMS about your TNG e-Wallet or a weird email claiming to be from LHDN, this application utilizes AI to identify potential danger.
 
 
 ## 📖 Project Explanation
